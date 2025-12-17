@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scroll Video Animation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            overflow-x: hidden;
+        }
+        
+        /* Loading indicator */
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            color: white;
+        }
+        
+        .loading-screen.hidden {
+            display: none;
+        }
+        
+        .loader {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #333;
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .loading-text {
+            margin-top: 20px;
+            font-size: 1.2rem;
+        }
+        
+        .canvas-container {
+            position: sticky;
+            top: 0;
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        
+        #frame-canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        .scroll-section {
+            height: 600vh; /* Longer scroll for more frames */
+            position: relative;
+        }
+        
+        .content {
+            position: relative;
+            z-index: 10;
+            padding: 100vh 5% 50px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading screen -->
+    <div class="loading-screen" id="loadingScreen">
+        <div class="loader"></div>
+        <div class="loading-text">Loading frames...</div>
+    </div>
+    
+    <div class="scroll-section">
+        <div class="canvas-container">
+            <canvas id="frame-canvas"></canvas>
+        </div>
+    </div>
+    
+    <div class="content">
+        <h1>Your Content Here</h1>
+        <p>Content appears after animation.</p>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+    <script>
+ gsap.registerPlugin(ScrollTrigger);
+
+const canvas = document.getElementById('frame-canvas');
+const ctx = canvas.getContext('2d');
+const frameCount = 490;
+const images = [];
+const frameData = { frame: 0 };
+
+// Placeholder for unloaded frames
+const placeholderCanvas = document.createElement('canvas');
+const placeholderCtx = placeholderCanvas.getContext('2d');
+
+// Initialize empty image array
+for (let i = 0; i < frameCount; i++) {
+    images[i] = null;
+}
+
+// Load only first 30 frames initially
+function loadInitialFrames() {
+    const promises = [];
+    for (let i = 0; i < 30; i++) {
+        promises.push(loadFrame(i));
+    }
+    
+    Promise.all(promises).then(() => {
+        initAnimation();
+        startBackgroundLoading();
+    });
+}
+
+// Load individual frame
+function loadFrame(index) {
+    return new Promise((resolve) => {
+        if (images[index]) {
+            resolve();
+            return;
+        }
+        
+        const img = new Image();
+        img.src = `./frames/frame_${(index + 1).toString().padStart(4, '0')}.webp`;
+        img.onload = () => {
+            images[index] = img;
+            resolve();
+        };
+        img.onerror = () => {
+            console.error(`Failed to load frame ${index}`);
+            resolve();
+        };
+    });
+}
+
+// Load frames in background (prioritize nearby frames)
+let currentLoadIndex = 30;
+function startBackgroundLoading() {
+    const loadNext = () => {
+        if (currentLoadIndex < frameCount) {
+            loadFrame(currentLoadIndex).then(() => {
+                currentLoadIndex++;
+                // Small delay between loads to not block rendering
+                setTimeout(loadNext, 50);
+            });
+        }
+    };
+    loadNext();
+}
+
+// Preload frames near current position
+function preloadNearby(currentFrame) {
+    const range = 15; // Load 15 frames ahead/behind
+    for (let i = -range; i <= range; i++) {
+        const idx = currentFrame + i;
+        if (idx >= 0 && idx < frameCount && !images[idx]) {
+            loadFrame(idx);
+        }
+    }
+}
+
+// Draw frame with fallback
+function drawFrame(index) {
+    const img = images[index];
+    
+    if (img && img.complete) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    } else {
+        // Show previous loaded frame or placeholder
+        let fallbackIndex = index;
+        while (fallbackIndex >= 0 && !images[fallbackIndex]) {
+            fallbackIndex--;
+        }
+        if (fallbackIndex >= 0 && images[fallbackIndex]) {
+            ctx.drawImage(images[fallbackIndex], 0, 0, canvas.width, canvas.height);
+        }
+        
+        // Load this frame with high priority
+        loadFrame(index);
+    }
+}
+
+function initAnimation() {
+    if (images[0]) {
+        canvas.width = images[0].width;
+        canvas.height = images[0].height;
+        drawFrame(0);
+    }
+    
+    document.getElementById('loadingScreen').classList.add('hidden');
+    
+    const tl = gsap.timeline({
+        scrollTrigger: {
+            trigger: ".scroll-section",
+            start: "top top",
+            end: "bottom bottom",
+            scrub: 2, // Higher scrub for smoother feel
+            pin: ".canvas-container",
+            anticipatePin: 1,
+            invalidateOnRefresh: true
+        }
+    });
+    
+    tl.to(frameData, {
+        frame: frameCount - 1,
+        ease: "none",
+        onUpdate: () => {
+            const frameIndex = Math.round(frameData.frame);
+            drawFrame(frameIndex);
+            preloadNearby(frameIndex);
+        }
+    });
+}
+
+loadInitialFrames();
+
+    </script>
+</body>
+</html>
